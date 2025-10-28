@@ -7,7 +7,7 @@ const guideSchema = new Schema<Guide>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-    },
+    } as any,
     fullName: {
       type: String,
       required: true,
