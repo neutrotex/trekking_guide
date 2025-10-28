@@ -4,11 +4,12 @@ import connectDB from '@/lib/mongodb';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
-    const trek = await TrekModel.findById(params.id);
+    const { id } = await params;
+    const trek = await TrekModel.findById(id);
 
     if (!trek) {
       return NextResponse.json({ error: 'Trek not found' }, { status: 404 });

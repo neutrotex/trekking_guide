@@ -4,11 +4,12 @@ import connectDB from '@/lib/mongodb';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
-    const guide = await GuideModel.findById(params.id).populate('userId', 'name email');
+    const { id } = await params;
+    const guide = await GuideModel.findById(id).populate('userId', 'name email');
 
     if (!guide) {
       return NextResponse.json({ error: 'Guide not found' }, { status: 404 });
