@@ -30,6 +30,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError(result.error);
       } else {
+        // Redirect will be handled by the main page based on user role
         router.push('/');
         router.refresh();
       }

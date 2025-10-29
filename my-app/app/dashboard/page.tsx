@@ -4,52 +4,59 @@ import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
+import AvailabilityCalendar from '@/components/AvailabilityCalendar';
 import { Guide } from '@/types/guide';
+
+interface Booking {
+  id: string;
+  guideId: string;
+  guideName: string;
+  userId: string;
+  userName: string;
+  from: string;
+  to: string;
+  duration: number;
+  totalCost: number;
+  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled';
+  createdAt: string;
+  expiresAt?: string;
+}
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [guide, setGuide] = useState<Guide | null>(null);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
-  
-  const [formData, setFormData] = useState({
-    fullName: '',
-    age: '',
-    education: '',
-    experienceYears: '',
-    wagesPerDay: '',
-    bio: '',
-    photoUrl: '',
-  });
+  const [showAvailabilityCalendar, setShowAvailabilityCalendar] = useState(false);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login');
     } else if (status === 'authenticated' && session?.user.role === 'guide') {
       fetchProfile();
+      fetchBookings();
+    } else if (status === 'authenticated' && session?.user.role === 'user') {
+      router.push('/user-dashboard');
     }
   }, [status, session]);
 
   const fetchProfile = async () => {
     try {
-      const response = await fetch('/api/guides');
+      console.log('Fetching profile for user:', session?.user.id);
+      const response = await fetch('/api/guides/profile');
       const data = await response.json();
       
-      const myGuide = data.guides?.find((g: Guide) => g.userId === session?.user.id);
+      console.log('Profile check result:', data);
       
-      if (myGuide) {
-        setGuide(myGuide);
-        setFormData({
-          fullName: myGuide.fullName,
-          age: myGuide.age.toString(),
-          education: myGuide.education,
-          experienceYears: myGuide.experienceYears.toString(),
-          wagesPerDay: myGuide.wagesPerDay.toString(),
-          bio: myGuide.bio,
-          photoUrl: myGuide.photoUrl,
-        });
+      if (data.hasProfile && data.guide) {
+        setGuide(data.guide);
+      } else {
+        console.log('No guide profile found, redirecting to create profile');
+        router.push('/create-profile');
+        return;
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -58,39 +65,92 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setMessage('');
-    setSubmitting(true);
-
+  const fetchBookings = async (showRefreshing = false) => {
     try {
-      const response = await fetch('/api/guides', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: formData.fullName,
-          age: parseInt(formData.age),
-          education: formData.education,
-          experienceYears: parseInt(formData.experienceYears),
-          wagesPerDay: parseInt(formData.wagesPerDay),
-          bio: formData.bio,
-          photoUrl: formData.photoUrl,
-        }),
+      if (showRefreshing) {
+        setRefreshing(true);
+      }
+      
+      console.log('Guide dashboard fetching bookings for guideId:', session?.user.id);
+      const response = await fetch(`/api/bookings?guideId=${session?.user.id}`);
+      const data = await response.json();
+      console.log('Guide dashboard received bookings:', data);
+      
+      setBookings(data.bookings || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      if (showRefreshing) {
+        setRefreshing(false);
+      }
+    }
+  };
+
+  const handleBookingStatus = async (bookingId: string, status: 'confirmed' | 'rejected') => {
+    try {
+      const response = await fetch('/api/bookings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ bookingId, status }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.error || 'Failed to save profile');
+      if (response.ok) {
+        setMessage(`Booking ${status} successfully`);
+        await fetchBookings(); // Refresh bookings
       } else {
-        setMessage('Profile saved successfully!');
-        fetchProfile();
+        const error = await response.json();
+        setMessage(`Error: ${error.error}`);
       }
     } catch (error) {
-      setMessage('An error occurred');
-    } finally {
-      setSubmitting(false);
+      setMessage('Error updating booking status');
     }
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'confirmed':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'rejected':
+        return 'bg-red-100 text-red-800';
+      case 'cancelled':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Calculate dashboard statistics
+  const getDashboardStats = () => {
+    const totalRequests = bookings.length;
+    const pendingRequests = bookings.filter(b => b.status === 'pending').length;
+    const confirmedBookings = bookings.filter(b => b.status === 'confirmed').length;
+    const completedTreks = bookings.filter(b => b.status === 'confirmed').length; // Assuming confirmed = completed
+    const totalEarnings = bookings
+      .filter(b => b.status === 'confirmed')
+      .reduce((sum, b) => sum + b.totalCost, 0);
+    const rejectionRate = totalRequests > 0 ? 
+      ((bookings.filter(b => b.status === 'rejected').length / totalRequests) * 100).toFixed(1) : '0';
+    
+    return {
+      totalRequests,
+      pendingRequests,
+      confirmedBookings,
+      completedTreks,
+      totalEarnings,
+      rejectionRate
+    };
   };
 
   if (status === 'loading' || loading) {
@@ -112,126 +172,411 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-100">
       <Navbar />
       <div className="container mx-auto px-4 py-8">
-        <h1 className="text-4xl font-bold text-gray-800 mb-8">
-          👤 Guide Dashboard
-        </h1>
-        
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-white rounded-lg shadow-lg p-8">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              {guide ? 'Edit Profile' : 'Create Profile'}
-            </h2>
-            
-            {message && (
-              <div className={`mb-4 p-4 rounded ${message.includes('success') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {message}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Age *
-                </label>
-                <input
-                  type="number"
-                  required
-                  value={formData.age}
-                  onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Education *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.education}
-                  onChange={(e) => setFormData({ ...formData, education: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Years of Experience *
-                </label>
-                <input
-                  type="number"
-                  required
-                  value={formData.experienceYears}
-                  onChange={(e) => setFormData({ ...formData, experienceYears: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Wages per Day (₹) *
-                </label>
-                <input
-                  type="number"
-                  required
-                  value={formData.wagesPerDay}
-                  onChange={(e) => setFormData({ ...formData, wagesPerDay: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Bio *
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={formData.bio}
-                  onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Photo URL
-                </label>
-                <input
-                  type="url"
-                  value={formData.photoUrl}
-                  onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="https://example.com/photo.jpg"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition disabled:opacity-50 font-semibold"
-              >
-                {submitting ? 'Saving...' : 'Save Profile'}
-              </button>
-            </form>
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-800 mb-2">
+                Welcome back, {guide?.fullName}! 👋
+              </h1>
+              <p className="text-gray-600">
+                Manage your bookings and track your performance
+              </p>
+            </div>
+            <button
+              onClick={() => fetchBookings(true)}
+              disabled={refreshing}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {refreshing ? (
+                <>
+                  <span className="animate-spin">🔄</span>
+                  <span>Refreshing...</span>
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  <span>Refresh</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-blue-100 rounded-full">
+                <span className="text-2xl">📋</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Requests</p>
+                <p className="text-2xl font-bold text-gray-900">{getDashboardStats().totalRequests}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-yellow-100 rounded-full">
+                <span className="text-2xl">⏳</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Pending Requests</p>
+                <p className="text-2xl font-bold text-gray-900">{getDashboardStats().pendingRequests}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-green-100 rounded-full">
+                <span className="text-2xl">✅</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Completed Treks</p>
+                <p className="text-2xl font-bold text-gray-900">{getDashboardStats().completedTreks}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-purple-100 rounded-full">
+                <span className="text-2xl">💰</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Earnings</p>
+                <p className="text-2xl font-bold text-gray-900">₹{getDashboardStats().totalEarnings}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Stats Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Confirmed Bookings</p>
+                <p className="text-3xl font-bold text-gray-900">{getDashboardStats().confirmedBookings}</p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-full">
+                <span className="text-2xl">🎯</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Rejection Rate</p>
+                <p className="text-3xl font-bold text-gray-900">{getDashboardStats().rejectionRate}%</p>
+              </div>
+              <div className="p-3 bg-red-100 rounded-full">
+                <span className="text-2xl">📊</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Guide Management Features */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Profile Management */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Profile Management</h2>
+            <div className="space-y-3">
+              <button
+                onClick={() => router.push('/edit-profile')}
+                className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition font-semibold text-left"
+              >
+                ✏️ Edit Profile Information
+              </button>
+              <button
+                onClick={() => {/* TODO: Add photo upload */}}
+                className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 transition font-semibold text-left"
+              >
+                📸 Update Profile Photo
+              </button>
+              <button
+                onClick={() => setShowAvailabilityCalendar(true)}
+                className="w-full bg-orange-600 text-white px-4 py-3 rounded-lg hover:bg-orange-700 transition font-semibold text-left"
+              >
+                📅 Set Availability Calendar
+              </button>
+            </div>
+          </div>
+
+          {/* Booking Management */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Booking Management</h2>
+            <div className="space-y-3">
+              <button
+                onClick={() => fetchBookings(true)}
+                disabled={refreshing}
+                className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {refreshing ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin">🔄</span>
+                    <span>Refreshing...</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <span>🔄</span>
+                    <span>Refresh Booking Requests</span>
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => {/* TODO: Add booking history */}}
+                className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 transition font-semibold text-left"
+              >
+                📋 View Booking History
+              </button>
+              <button
+                onClick={() => {/* TODO: Add earnings report */}}
+                className="w-full bg-yellow-600 text-white px-4 py-3 rounded-lg hover:bg-yellow-700 transition font-semibold text-left"
+              >
+                💰 View Earnings Report
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Guide Status & Settings */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Guide Status & Settings</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Profile Status</p>
+                <p className="text-lg font-bold text-green-600">Active</p>
+              </div>
+              <div className="p-2 bg-green-100 rounded-full">
+                <span className="text-green-600">✓</span>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Daily Rate</p>
+                <p className="text-lg font-bold text-gray-900">₹{guide?.wagesPerDay || 0}</p>
+              </div>
+              <div className="p-2 bg-blue-100 rounded-full">
+                <span className="text-blue-600">₹</span>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Experience</p>
+                <p className="text-lg font-bold text-gray-900">{guide?.experienceYears || 0} years</p>
+              </div>
+              <div className="p-2 bg-purple-100 rounded-full">
+                <span className="text-purple-600">⭐</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Earnings & Performance Analytics */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Earnings & Performance Analytics</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">₹{getDashboardStats().totalEarnings}</div>
+              <div className="text-sm text-gray-600">Total Earnings</div>
+            </div>
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">{getDashboardStats().confirmedBookings}</div>
+              <div className="text-sm text-gray-600">Completed Jobs</div>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <div className="text-2xl font-bold text-purple-600">
+                {getDashboardStats().totalRequests > 0 ? 
+                  ((getDashboardStats().confirmedBookings / getDashboardStats().totalRequests) * 100).toFixed(1) : '0'}%
+              </div>
+              <div className="text-sm text-gray-600">Success Rate</div>
+            </div>
+            <div className="text-center p-4 bg-orange-50 rounded-lg">
+              <div className="text-2xl font-bold text-orange-600">
+                {getDashboardStats().totalRequests > 0 ? 
+                  Math.round(getDashboardStats().totalEarnings / getDashboardStats().confirmedBookings) : 0}
+              </div>
+              <div className="text-sm text-gray-600">Avg. per Job</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Guide Tools & Resources */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Guide Tools & Resources</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <button
+                onClick={() => {/* TODO: Add trek route planner */}}
+                className="w-full bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700 transition font-semibold text-left"
+              >
+                🗺️ Trek Route Planner
+              </button>
+              <button
+                onClick={() => {/* TODO: Add equipment checklist */}}
+                className="w-full bg-cyan-600 text-white px-4 py-3 rounded-lg hover:bg-cyan-700 transition font-semibold text-left"
+              >
+                🎒 Equipment Checklist
+              </button>
+              <button
+                onClick={() => {/* TODO: Add weather forecast */}}
+                className="w-full bg-sky-600 text-white px-4 py-3 rounded-lg hover:bg-sky-700 transition font-semibold text-left"
+              >
+                🌤️ Weather Forecast
+              </button>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={() => {/* TODO: Add emergency contacts */}}
+                className="w-full bg-red-600 text-white px-4 py-3 rounded-lg hover:bg-red-700 transition font-semibold text-left"
+              >
+                🚨 Emergency Contacts
+              </button>
+              <button
+                onClick={() => {/* TODO: Add first aid guide */}}
+                className="w-full bg-pink-600 text-white px-4 py-3 rounded-lg hover:bg-pink-700 transition font-semibold text-left"
+              >
+                🩹 First Aid Guide
+              </button>
+              <button
+                onClick={() => {/* TODO: Add guide community */}}
+                className="w-full bg-violet-600 text-white px-4 py-3 rounded-lg hover:bg-violet-700 transition font-semibold text-left"
+              >
+                👥 Guide Community
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Bookings Section */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Recent Booking Requests</h2>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => fetchBookings(true)}
+                disabled={loading}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Refreshing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔄</span>
+                    <span>Refresh</span>
+                  </>
+                )}
+              </button>
+              {bookings.filter(b => b.status === 'pending').length > 0 && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-semibold text-red-600">
+                    {bookings.filter(b => b.status === 'pending').length} New Request{bookings.filter(b => b.status === 'pending').length > 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {bookings.length > 0 ? (
+            <div className="space-y-4">
+              {bookings.slice(0, 5).map((booking) => (
+                <div
+                  key={booking.id}
+                  className={`border rounded-lg p-4 hover:bg-gray-50 transition ${
+                    booking.status === 'pending' 
+                      ? 'border-red-300 bg-red-50 shadow-md' 
+                      : 'border-gray-200'
+                  }`}
+                >
+                  {booking.status === 'pending' && (
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-semibold text-red-600">NEW REQUEST - Action Required</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-semibold text-gray-800">
+                          {booking.userName}
+                        </h3>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
+                          {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                        </span>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600 mb-3">
+                        <div>
+                          <span className="font-medium">Start Date:</span> {formatDate(booking.from)}
+                        </div>
+                        <div>
+                          <span className="font-medium">End Date:</span> {formatDate(booking.to)}
+                        </div>
+                        <div>
+                          <span className="font-medium">Total Cost:</span> ₹{booking.totalCost}
+                        </div>
+                      </div>
+                      
+                      <div className="text-xs text-gray-500 mb-3">
+                        Requested on {formatDate(booking.createdAt)}
+                      </div>
+
+                      {booking.status === 'pending' && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleBookingStatus(booking.id, 'confirmed')}
+                            className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => handleBookingStatus(booking.id, 'rejected')}
+                            className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              
+              {bookings.length > 5 && (
+                <div className="text-center pt-4">
+                  <p className="text-gray-600">
+                    Showing 5 of {bookings.length} bookings
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">📅</div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">No booking requests yet</h3>
+              <p className="text-gray-600">Your booking requests will appear here when users book your services.</p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Availability Calendar Modal */}
+      {showAvailabilityCalendar && (
+        <AvailabilityCalendar onClose={() => setShowAvailabilityCalendar(false)} />
+      )}
     </div>
   );
 }
-
