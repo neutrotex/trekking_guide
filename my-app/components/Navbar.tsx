@@ -26,11 +26,12 @@ export default function Navbar() {
               <span>Loading...</span>
             ) : session ? (
               <>
-                {session.user.role === 'guide' && (
-                  <Link href="/dashboard" className="hover:text-green-200 transition">
-                    Dashboard
-                  </Link>
-                )}
+                <Link 
+                  href={session.user.role === 'guide' ? '/dashboard' : '/user-dashboard'} 
+                  className="hover:text-green-200 transition"
+                >
+                  Dashboard
+                </Link>
                 <span className="text-green-200">{session.user.name}</span>
                 <button
                   onClick={() => signOut()}

@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
+import BookingModel from '@/models/Booking';
 
-// Mock booking storage - replace with actual MongoDB collection
-let bookings: Array<{
-  id: string;
-  guideId: string;
-  guideName: string;
-  userId: string;
-  userName: string;
-  from: Date;
-  to: Date;
-  duration: number;
-  totalCost: number;
-  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled';
-  createdAt: Date;
-  expiresAt?: Date; // For temporary bookings
-}> = [];
+// Function to check guide availability
+async function checkGuideAvailability(guideId: string, startDate: string, endDate: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/availability?guideId=${guideId}&startDate=${startDate}&endDate=${endDate}`);
+    const data = await response.json();
+    
+    if (data.availability && data.availability.length > 0) {
+      // Check if any date in the range is marked as unavailable
+      const unavailableDates = data.availability.filter((av: any) => !av.isAvailable);
+      return unavailableDates.length === 0;
+    }
+    
+    return true; // Default to available if no specific availability set
+  } catch (error) {
+    console.error('Error checking availability:', error);
+    return true; // Default to available on error
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,14 +35,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Check guide availability
+    const startDate = new Date(from).toISOString().split('T')[0];
+    const endDate = new Date(to).toISOString().split('T')[0];
+    const isAvailable = await checkGuideAvailability(guideId, startDate, endDate);
+
+    if (!isAvailable) {
+      return NextResponse.json(
+        { error: 'Guide is not available for the selected date range' },
+        { status: 409 }
+      );
+    }
+
     // Check for conflicting bookings (confirmed or pending)
-    const conflictingBooking = bookings.find(booking => 
-      booking.guideId === guideId && 
-      (booking.status === 'confirmed' || booking.status === 'pending') &&
-      (
-        (new Date(from) <= booking.to && new Date(to) >= booking.from)
-      )
-    );
+    const conflictingBooking = await BookingModel.findOne({
+      guideId,
+      status: { $in: ['confirmed', 'pending'] },
+      $or: [
+        {
+          from: { $lte: new Date(to) },
+          to: { $gte: new Date(from) }
+        }
+      ]
+    });
 
     if (conflictingBooking) {
       return NextResponse.json(
@@ -48,11 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create new booking with pending status and 30-minute expiry
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutes from now
-
-    const newBooking = {
-      id: `booking_${Date.now()}`,
+    const newBooking = new BookingModel({
       guideId,
       guideName,
       userId,
@@ -61,12 +76,19 @@ export async function POST(req: NextRequest) {
       to: new Date(to),
       duration,
       totalCost,
-      status: 'pending' as const,
-      createdAt: now,
-      expiresAt,
-    };
+      status: 'pending',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes from now
+    });
 
-    bookings.push(newBooking);
+    await newBooking.save();
+    
+    console.log('Booking created successfully:', {
+      id: newBooking._id,
+      guideId: newBooking.guideId,
+      userId: newBooking.userId,
+      status: newBooking.status,
+      createdAt: newBooking.createdAt
+    });
 
     return NextResponse.json(
       { 
@@ -92,28 +114,40 @@ export async function GET(req: NextRequest) {
     const guideId = searchParams.get('guideId');
     const userId = searchParams.get('userId');
 
-    // Filter out expired pending bookings
-    const now = new Date();
-    const activeBookings = bookings.filter(booking => {
-      if (booking.status === 'pending' && booking.expiresAt && booking.expiresAt < now) {
-        // Auto-expire pending bookings
-        booking.status = 'cancelled';
-        return false;
+    // Auto-expire pending bookings that have passed their expiry time
+    await BookingModel.updateMany(
+      {
+        status: 'pending',
+        expiresAt: { $lt: new Date() }
+      },
+      {
+        $set: { status: 'cancelled' }
       }
-      return true;
+    );
+
+    // Build query
+    const query: any = {};
+    if (guideId) {
+      query.guideId = guideId;
+    }
+    if (userId) {
+      query.userId = userId;
+    }
+
+    // Fetch bookings from database
+    const bookings = await BookingModel.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log('Fetching bookings:', {
+      query,
+      guideId,
+      userId,
+      foundBookings: bookings.length,
+      bookings: bookings.map(b => ({ id: b._id, guideId: b.guideId, userId: b.userId, status: b.status }))
     });
 
-    let filteredBookings = activeBookings;
-
-    if (guideId) {
-      filteredBookings = filteredBookings.filter(booking => booking.guideId === guideId);
-    }
-
-    if (userId) {
-      filteredBookings = filteredBookings.filter(booking => booking.userId === userId);
-    }
-
-    return NextResponse.json({ bookings: filteredBookings }, { status: 200 });
+    return NextResponse.json({ bookings }, { status: 200 });
   } catch (error: any) {
     console.error('Error fetching bookings:', error);
     return NextResponse.json(
@@ -143,7 +177,7 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const booking = bookings.find(b => b.id === bookingId);
+    const booking = await BookingModel.findById(bookingId);
 
     if (!booking) {
       return NextResponse.json(
@@ -162,6 +196,7 @@ export async function PUT(req: NextRequest) {
     // Check if booking has expired
     if (booking.expiresAt && booking.expiresAt < new Date()) {
       booking.status = 'cancelled';
+      await booking.save();
       return NextResponse.json(
         { error: 'Booking has expired' },
         { status: 410 }
@@ -170,6 +205,7 @@ export async function PUT(req: NextRequest) {
 
     // Update booking status
     booking.status = status as 'confirmed' | 'rejected';
+    await booking.save();
 
     return NextResponse.json(
       { 

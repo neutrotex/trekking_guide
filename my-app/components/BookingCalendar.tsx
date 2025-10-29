@@ -15,20 +15,30 @@ interface BookingCalendarProps {
   onConfirm: (dateRange: { from: Date; to: Date }) => void;
 }
 
+interface AvailabilityData {
+  guideId: string;
+  date: string;
+  isAvailable: boolean;
+  updatedAt: string;
+}
+
 export default function BookingCalendar({ guideName, guideId, guideRate, isOpen, onClose, onConfirm }: BookingCalendarProps) {
   const [selectedRange, setSelectedRange] = useState<DateRange | undefined>(undefined);
   const [isBooking, setIsBooking] = useState(false);
   const [bookedRanges, setBookedRanges] = useState<Array<{ from: Date; to: Date; status: string }>>([]);
+  const [guideAvailability, setGuideAvailability] = useState<AvailabilityData[]>([]);
   const { data: session, status } = useSession();
 
-  // Fetch existing bookings for this guide
+  // Fetch existing bookings and availability for this guide
   useEffect(() => {
     if (isOpen && guideId) {
       fetchBookings();
+      fetchAvailability();
       
       // Set up periodic refresh to handle booking expiry
       const interval = setInterval(() => {
         fetchBookings();
+        fetchAvailability();
       }, 30000); // Refresh every 30 seconds
 
       return () => clearInterval(interval);
@@ -55,232 +65,578 @@ export default function BookingCalendar({ guideName, guideId, guideRate, isOpen,
     }
   };
 
-  const disabledDates = {
-    before: new Date(), // Disable past dates
-    filters: [
-      (date: Date) => bookedRanges.some(range => 
-        date >= range.from && date <= range.to
-      )
-    ]
+  const fetchAvailability = async () => {
+    try {
+      const response = await fetch(`/api/availability?guideId=${guideId}`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setGuideAvailability(data.availability || []);
+      }
+    } catch (error) {
+      console.error('Error fetching availability:', error);
+    }
   };
 
-  const checkAvailability = (from: Date, to: Date): boolean => {
-    // Check if the selected range conflicts with any booked ranges
-    return !bookedRanges.some(range => 
-      (from <= range.to && to >= range.from)
+  const isDateUnavailable = (date: Date) => {
+    if (!date) return false;
+    
+    const dateString = date.toISOString().split('T')[0];
+    
+    // Check if guide has marked this date as unavailable
+    const availability = guideAvailability.find(av => av.date === dateString);
+    if (availability && !availability.isAvailable) {
+      return true;
+    }
+    
+    // Check if date is in any booked range
+    return bookedRanges.some(range => 
+      date >= range.from && date <= range.to
     );
   };
 
-  const handleConfirm = async () => {
-    if (selectedRange?.from && selectedRange?.to) {
-      // Check if user is authenticated
-      if (status === 'loading') {
-        toast.loading('Loading...');
-        return;
-      }
-      
-      if (!session) {
-        toast.error('Please log in to book a guide');
-        return;
-      }
+  const getDateAvailabilityStatus = (date: Date) => {
+    if (!date) return 'available';
+    
+    const dateString = date.toISOString().split('T')[0];
+    
+    // Check if guide has marked this date as unavailable
+    const availability = guideAvailability.find(av => av.date === dateString);
+    if (availability) {
+      return availability.isAvailable ? 'available' : 'unavailable';
+    }
+    
+    // Check if date is in any booked range
+    const isBooked = bookedRanges.some(range => 
+      date >= range.from && date <= range.to
+    );
+    
+    if (isBooked) {
+      return 'booked';
+    }
+    
+    return 'available'; // Default to available
+  };
 
-      setIsBooking(true);
-      
-      try {
-        const duration = Math.ceil((selectedRange.to.getTime() - selectedRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        const totalCost = duration * guideRate;
-        
-        // Create booking via API
-        const response = await fetch('/api/bookings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            guideId,
-            guideName,
-            userId: session.user?.id,
-            userName: session.user?.name,
-            from: selectedRange.from.toISOString(),
-            to: selectedRange.to.toISOString(),
-            duration,
-            totalCost,
-          }),
-        });
 
-        const data = await response.json();
+  const calculateDuration = () => {
+    if (!selectedRange?.from || !selectedRange?.to) return 0;
+    const diffTime = Math.abs(selectedRange.to.getTime() - selectedRange.from.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
+  };
 
-        if (response.ok) {
-          // Immediately add the new booking to bookedRanges for instant visual feedback
-          if (selectedRange.from && selectedRange.to) {
-            setBookedRanges(prev => [...prev, {
-              from: selectedRange.from!,
-              to: selectedRange.to!,
-              status: 'pending'
-            }]);
-          }
-          
-          // Refresh bookings to update availability
-          await fetchBookings();
+  const calculateTotalCost = () => {
+    return calculateDuration() * guideRate;
+  };
+
+  const handleBooking = async () => {
+    if (!selectedRange?.from || !selectedRange?.to) {
+      toast.error('Please select a date range');
+      return;
+    }
+
+    if (!session) {
+      toast.error('Please log in to book a guide');
+      return;
+    }
+
+    setIsBooking(true);
+
+    try {
+      console.log('Creating booking with data:', {
+        guideId,
+        guideName,
+        userId: session.user.id,
+        userName: session.user.name,
+        from: selectedRange.from.toISOString(),
+        to: selectedRange.to.toISOString(),
+        duration: calculateDuration(),
+        totalCost: calculateTotalCost(),
+      });
+
+      const response = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          guideId,
+          guideName,
+          userId: session.user.id,
+          userName: session.user.name,
+          from: selectedRange.from.toISOString(),
+          to: selectedRange.to.toISOString(),
+          duration: calculateDuration(),
+          totalCost: calculateTotalCost(),
+        }),
+      });
+
+      const data = await response.json();
+      console.log('Booking response:', { response: response.ok, data });
+
+      if (response.ok) {
+        toast.success('Booking request sent successfully!');
+        if (selectedRange.from && selectedRange.to) {
           onConfirm({ from: selectedRange.from, to: selectedRange.to });
-          setSelectedRange(undefined);
-        } else {
-          toast.error(data.error || 'Booking failed. Please try again.');
         }
-      } catch (error) {
-        console.error('Booking error:', error);
-        toast.error('Booking failed. Please try again.');
+        onClose();
+      } else {
+        toast.error(data.error || 'Failed to create booking');
       }
-      
+    } catch (error) {
+      toast.error('Error creating booking');
+    } finally {
       setIsBooking(false);
     }
   };
 
   if (!isOpen) return null;
 
-  // Show login prompt if user is not authenticated
-  if (status === 'unauthenticated') {
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg max-w-md w-full p-6">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">
-              Login Required
-            </h2>
-            <p className="text-gray-600 mb-6">
-              Please log in to book {guideName}
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={onClose}
-                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  onClose();
-                  window.location.href = '/login';
-                }}
-                className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-medium"
-              >
-                Go to Login
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-800">
-              Book {guideName}
-            </h2>
-            {session && (
-              <p className="text-sm text-gray-600 mt-1">
-                Booking as: <span className="font-medium">{session.user?.name}</span>
-              </p>
-            )}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-2xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="p-8">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h2 className="text-3xl font-bold text-gray-800 mb-2">Book {guideName}</h2>
+              <p className="text-gray-600 text-lg">Select your preferred dates for the trek</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-3xl transition-colors"
+            >
+              ×
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl"
-          >
-            ×
-          </button>
-        </div>
 
-        {/* Calendar */}
-        <div className="mb-6 pl-10">
-          <DayPicker
-            mode="range"
-            selected={selectedRange}
-            onSelect={setSelectedRange}
-            disabled={disabledDates}
-            className="w-full text-black"
-            numberOfMonths={2}
-          />
-        </div>
+          {/* User Info */}
+          {session && (
+            <div className="mb-8 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                  {session.user.name?.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-blue-800 font-semibold text-lg">
+                    Booking for: {session.user.name}
+                  </p>
+                  <p className="text-blue-600 text-sm">{session.user.email}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
-        {/* Legend */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Legend:</h3>
-          <div className="space-y-1 text-sm">
-            <div className="flex items-center">
-              <div className="w-4 h-4 bg-blue-500 rounded mr-2"></div>
-              <span className="text-gray-600">Available</span>
+          {/* Login Prompt */}
+          {!session && (
+            <div className="mb-8 p-6 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border border-yellow-200">
+              <div className="flex items-center gap-3">
+                <div className="text-2xl">🔒</div>
+                <div>
+                  <p className="text-yellow-800 font-semibold text-lg">
+                    Please log in to book this guide
+                  </p>
+                  <p className="text-yellow-600 text-sm">You need to be logged in to make a booking</p>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 bg-red-300 rounded mr-2"></div>
-              <span className="text-gray-600">Confirmed Bookings</span>
+          )}
+
+          {/* Calendar Container */}
+          <div className="mb-8 bg-gray-50 rounded-xl p-4">
+            <div className="text-center mb-6">
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">Select Your Dates</h3>
+              <p className="text-gray-600">Choose your start and end dates for the trek</p>
             </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 bg-yellow-300 rounded mr-2"></div>
-              <span className="text-gray-600">Pending Bookings (30min)</span>
+            
+            {/* Custom Calendar Styles */}
+            <style jsx global>{`
+              /* Remove grid lines and make calendar bigger */
+              .rdp-table {
+                border-collapse: separate !important;
+                border-spacing: 8px !important;
+              }
+              
+              .rdp-day_button {
+                width: 3rem !important;
+                height: 3rem !important;
+                border-radius: 0.75rem !important;
+                font-weight: 600 !important;
+                font-size: 1rem !important;
+                transition: all 0.2s ease !important;
+                border: 2px solid transparent !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                margin: 4px !important;
+              }
+              
+              .rdp-day_button:hover:not(:disabled) {
+                transform: scale(1.05) !important;
+              }
+              
+              .rdp-day_button:disabled {
+                cursor: not-allowed !important;
+                opacity: 0.6 !important;
+              }
+              
+              .rdp-day_button:not(:disabled) {
+                cursor: pointer !important;
+              }
+              
+              /* Override default react-day-picker styles for range selection */
+              .rdp-day_button[aria-selected="true"] {
+                background-color: #3b82f6 !important;
+                color: white !important;
+                border-color: #2563eb !important;
+                z-index: 2 !important;
+              }
+              
+              .rdp-day_button[aria-selected="true"]:hover {
+                background-color: #2563eb !important;
+                border-color: #1d4ed8 !important;
+              }
+              
+              /* Range selection styles */
+              .rdp-day_button[data-range-start="true"] {
+                background-color: #3b82f6 !important;
+                color: white !important;
+                border-color: #2563eb !important;
+                border-radius: 0.75rem !important;
+              }
+              
+              .rdp-day_button[data-range-end="true"] {
+                background-color: #3b82f6 !important;
+                color: white !important;
+                border-color: #2563eb !important;
+                border-radius: 0.75rem !important;
+              }
+              
+              .rdp-day_button[data-in-range="true"] {
+                background-color: #dbeafe !important;
+                color: #1e40af !important;
+                border-color: #93c5fd !important;
+                border-radius: 0.75rem !important;
+              }
+              
+              /* Ensure proper text colors */
+              .rdp-day_button {
+                color: inherit !important;
+              }
+              
+              /* Fix any potential duplicate rendering issues */
+              .rdp-day {
+                position: relative !important;
+                padding: 4px !important;
+              }
+              
+              .rdp-day_button[data-available="true"] {
+                background-color: #10b981 !important;
+                color: white !important;
+                border-color: #059669 !important;
+              }
+              
+              .rdp-day_button[data-unavailable="true"] {
+                background-color: #ef4444 !important;
+                color: white !important;
+                border-color: #dc2626 !important;
+              }
+              
+              .rdp-day_button[data-booked="true"] {
+                background-color: #f97316 !important;
+                color: white !important;
+                border-color: #ea580c !important;
+              }
+              
+              .rdp-day_button[data-past="true"] {
+                background-color: #9ca3af !important;
+                color: white !important;
+                border-color: #6b7280 !important;
+              }
+              
+              /* Remove all table borders and grid lines */
+              .rdp-table,
+              .rdp-table td,
+              .rdp-table th,
+              .rdp-table tr,
+              .rdp-month_table,
+              .rdp-month_table td,
+              .rdp-month_table th,
+              .rdp-month_table tr {
+                border: none !important;
+                border-collapse: separate !important;
+                border-spacing: 8px !important;
+              }
+              
+              .rdp-table td {
+                padding: 4px !important;
+                border: none !important;
+                background: none !important;
+              }
+              
+              .rdp-table th {
+                padding: 8px !important;
+                border: none !important;
+                background: none !important;
+              }
+              
+              /* Remove any remaining borders */
+              .rdp-day,
+              .rdp-day_button,
+              .rdp-cell {
+                border: none !important;
+                outline: none !important;
+              }
+              
+              /* Remove focus outlines that might look like borders */
+              .rdp-day_button:focus {
+                outline: none !important;
+                box-shadow: none !important;
+              }
+              
+              /* Make month headers bigger */
+              .rdp-caption {
+                font-size: 1.25rem !important;
+                font-weight: 700 !important;
+                margin-bottom: 1rem !important;
+              }
+              
+              /* Make weekday headers bigger */
+              .rdp-head_cell {
+                font-size: 0.875rem !important;
+                font-weight: 600 !important;
+                color: #374151 !important;
+              }
+            `}</style>
+            
+            <DayPicker
+              mode="range"
+              selected={selectedRange}
+              onSelect={setSelectedRange}
+              numberOfMonths={2}
+              modifiers={{
+                available: (date: Date) => getDateAvailabilityStatus(date) === 'available',
+                unavailable: (date: Date) => getDateAvailabilityStatus(date) === 'unavailable',
+                booked: (date: Date) => getDateAvailabilityStatus(date) === 'booked',
+                past: (date: Date) => date < new Date()
+              }}
+              modifiersStyles={{
+                available: {
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #059669',
+                },
+                unavailable: {
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #dc2626',
+                },
+                booked: {
+                  backgroundColor: '#f97316',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #ea580c',
+                },
+                past: {
+                  backgroundColor: '#9ca3af',
+                  color: 'white',
+                  borderRadius: '8px',
+                  border: '2px solid #6b7280',
+                },
+                selected: {
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #2563eb',
+                },
+                range_start: {
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #2563eb',
+                },
+                range_end: {
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #2563eb',
+                },
+                range_middle: {
+                  backgroundColor: '#dbeafe',
+                  color: '#1e40af',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  border: '2px solid #93c5fd',
+                },
+              }}
+              disabled={[
+                { before: new Date() },
+                (date: Date) => isDateUnavailable(date)
+              ]}
+              className="w-full"
+            />
+          </div>
+
+          {/* Enhanced Legend */}
+          <div className="mb-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
+              <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-bold">✓</span>
+              </div>
+              <div>
+                <span className="font-semibold text-green-800">Available</span>
+                <p className="text-green-600 text-xs">Ready to book</p>
+              </div>
             </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 bg-gray-300 rounded mr-2"></div>
-              <span className="text-gray-600">Past Dates</span>
+            <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg">
+              <div className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-bold">✗</span>
+              </div>
+              <div>
+                <span className="font-semibold text-red-800">Unavailable</span>
+                <p className="text-red-600 text-xs">Guide not available</p>
+              </div>
             </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 bg-green-400 rounded mr-2"></div>
-              <span className="text-gray-600">Selected Range</span>
+            <div className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg">
+              <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-bold">!</span>
+              </div>
+              <div>
+                <span className="font-semibold text-orange-800">Booked</span>
+                <p className="text-orange-600 text-xs">Already taken</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+              <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-bold">-</span>
+              </div>
+              <div>
+                <span className="font-semibold text-gray-800">Past</span>
+                <p className="text-gray-600 text-xs">Cannot select</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Selected Date Range Display */}
-        {selectedRange?.from && selectedRange?.to && (
-          <div className="mb-6 p-3 bg-blue-50 rounded-lg">
-            <p className="text-sm text-gray-700">
-              <span className="font-semibold">Selected Date Range:</span>
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              From: {selectedRange.from.toLocaleDateString('en-US', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </p>
-            <p className="text-sm text-gray-600">
-              To: {selectedRange.to.toLocaleDateString('en-US', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              Duration: {Math.ceil((selectedRange.to.getTime() - selectedRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1} days
-            </p>
-            <p className="text-sm text-green-600 font-semibold mt-1">
-              Total Cost: ₹{(Math.ceil((selectedRange.to.getTime() - selectedRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1) * guideRate}
-            </p>
+          {/* Enhanced Booking Summary */}
+          {selectedRange?.from && selectedRange?.to && (
+            <div className="mb-8 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">📅</span>
+                </div>
+                <h3 className="text-xl font-bold text-green-800">Booking Summary</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Start Date:</span>
+                    <span className="text-gray-800 font-semibold">{selectedRange.from.toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">End Date:</span>
+                    <span className="text-gray-800 font-semibold">{selectedRange.to.toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Duration:</span>
+                    <span className="text-gray-800 font-semibold">{calculateDuration()} days</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Daily Rate:</span>
+                    <span className="text-gray-800 font-semibold">₹{guideRate}</span>
+                  </div>
+                  <div className="border-t pt-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-lg font-bold text-green-700">Total Cost:</span>
+                      <span className="text-2xl font-bold text-green-600">₹{calculateTotalCost()}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Enhanced Action Buttons */}
+          <div className="flex gap-4 mb-8">
+            <button
+              onClick={handleBooking}
+              disabled={!selectedRange?.from || !selectedRange?.to || !session || isBooking}
+              className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 px-8 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+            >
+              {isBooking ? (
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Booking...</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2">
+                  <span>🎯</span>
+                  <span>Book Guide</span>
+                </div>
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              className="px-8 py-4 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 font-semibold text-lg"
+            >
+              Cancel
+            </button>
           </div>
-        )}
 
-        {/* Action Buttons */}
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!selectedRange?.from || !selectedRange?.to || isBooking}
-            className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isBooking ? 'Booking...' : 'Confirm Booking'}
-          </button>
+          {/* Enhanced Instructions */}
+          <div className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="text-2xl">💡</div>
+              <h3 className="text-lg font-bold text-blue-800">Booking Instructions</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm">Select your start and end dates for the trek</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm"><span className="font-semibold text-green-600">Green dates</span> are available for booking</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-red-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm"><span className="font-semibold text-red-600">Red dates</span> are unavailable (guide has marked them as unavailable)</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-orange-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm"><span className="font-semibold text-orange-600">Orange dates</span> are already booked by other users</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm">Hover over dates to see their availability status</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm">Your booking will be pending until the guide confirms it</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm">The guide has 30 minutes to respond to your booking request</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-blue-700 text-sm">You'll receive a notification once the guide responds</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
