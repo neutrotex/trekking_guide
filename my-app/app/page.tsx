@@ -1,20 +1,38 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import { Trek } from '@/types/trek';
 import { Guide } from '@/types/guide';
 
 export default function HomePage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [treks, setTreks] = useState<Trek[]>([]);
   const [guides, setGuides] = useState<(Guide & { userId?: { name: string; email: string } })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    // Redirect authenticated users to their respective dashboards
+    if (status === 'authenticated') {
+      if (session?.user.role === 'guide') {
+        router.push('/dashboard');
+        return;
+      } else if (session?.user.role === 'user') {
+        router.push('/user-dashboard');
+        return;
+      }
+    }
+    
+    // Only fetch data for unauthenticated users (public homepage)
+    if (status === 'unauthenticated') {
+      fetchData();
+    }
+  }, [status, session]);
 
   const fetchData = async () => {
     try {
