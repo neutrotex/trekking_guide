@@ -50,9 +50,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Convert string IDs to ObjectIds
-    const guideIdObjectId = new mongoose.Types.ObjectId(guideId);
-    const userIdObjectId = new mongoose.Types.ObjectId(userId);
+    // IDs are stored as strings in Booking schema; keep them as strings
 
     // Check guide availability
     const startDate = new Date(from).toISOString().split('T')[0];
@@ -68,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     // Check for conflicting bookings (confirmed or pending)
     const conflictingBooking = await BookingModel.findOne({
-      guideId: guideIdObjectId,
+      guideId: guideId,
       status: { $in: ['confirmed', 'pending'] },
       $or: [
         {
@@ -87,9 +85,9 @@ export async function POST(req: NextRequest) {
 
     // Create new booking with pending status and 30-minute expiry
     const newBooking = new BookingModel({
-      guideId: guideIdObjectId,
+      guideId: guideId,
       guideName,
-      userId: userIdObjectId,
+      userId: userId,
       userName,
       from: new Date(from),
       to: new Date(to),
@@ -146,41 +144,24 @@ export async function GET(req: NextRequest) {
       }
     );
 
-    // Build query
+    // Build query (IDs are stored as strings in Booking schema)
     const query: any = {};
     if (guideId) {
-      try {
-        query.guideId = new mongoose.Types.ObjectId(guideId);
-      } catch (error) {
-        console.error('Invalid guideId format:', guideId);
-        return NextResponse.json(
-          { error: 'Invalid guide ID format' },
-          { status: 400 }
-        );
-      }
+      query.guideId = guideId;
     }
     if (userId) {
-      try {
-        query.userId = new mongoose.Types.ObjectId(userId);
-      } catch (error) {
-        console.error('Invalid userId format:', userId);
-        return NextResponse.json(
-          { error: 'Invalid user ID format' },
-          { status: 400 }
-        );
-      }
+      query.userId = userId;
     }
 
-    // Fetch bookings from database
+    // Fetch bookings from database (avoid lean() to keep typings simple)
     const bookings = await BookingModel.find(query)
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
 
     // Format the bookings to include id field
     const formattedBookings = bookings.map(booking => ({
       id: booking._id.toString(),
-      guideId: booking.guideId.toString(),
-      userId: booking.userId.toString(),
+      guideId: booking.guideId,
+      userId: booking.userId,
       guideName: booking.guideName,
       userName: booking.userName,
       from: booking.from,
