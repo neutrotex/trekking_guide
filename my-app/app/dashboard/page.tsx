@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const [guide, setGuide] = useState<Guide | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  
   const [message, setMessage] = useState('');
   const [showAvailabilityCalendar, setShowAvailabilityCalendar] = useState(false);
   const [cancellingBooking, setCancellingBooking] = useState<string | null>(null);
@@ -74,11 +74,8 @@ export default function DashboardPage() {
     }
   }, [guide]);
 
-  const fetchBookings = async (showRefreshing = false) => {
+  const fetchBookings = async (_showRefreshing = false) => {
     try {
-      if (showRefreshing) {
-        setRefreshing(true);
-      }
       
       console.log('Guide dashboard fetching bookings for guide profile:', guide);
       console.log('Using guide._id as guideId:', guide?._id);
@@ -96,10 +93,6 @@ export default function DashboardPage() {
       setBookings(data.bookings || []);
     } catch (error) {
       console.error('Error fetching bookings:', error);
-    } finally {
-      if (showRefreshing) {
-        setRefreshing(false);
-      }
     }
   };
 
@@ -238,23 +231,7 @@ export default function DashboardPage() {
                 Manage your bookings and track your performance
               </p>
             </div>
-            <button
-              onClick={() => fetchBookings(true)}
-              disabled={refreshing}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {refreshing ? (
-                <>
-                  <span className="animate-spin">🔄</span>
-                  <span>Refreshing...</span>
-                </>
-              ) : (
-                <>
-                  <span>🔄</span>
-                  <span>Refresh</span>
-                </>
-              )}
-            </button>
+            
           </div>
         </div>
 
@@ -367,23 +344,7 @@ export default function DashboardPage() {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Booking Management</h2>
             <div className="space-y-3">
-              <button
-                onClick={() => fetchBookings(true)}
-                disabled={refreshing}
-                className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-left disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {refreshing ? (
-                  <span className="flex items-center gap-2">
-                    <span className="animate-spin">🔄</span>
-                    <span>Refreshing...</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <span>🔄</span>
-                    <span>Refresh Booking Requests</span>
-                  </span>
-                )}
-              </button>
+              
               <button
                 onClick={() => {/* TODO: Add booking history */}}
                 className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 transition font-semibold text-left"
@@ -499,23 +460,6 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-800">Recent Booking Requests</h2>
             <div className="flex items-center gap-4">
-              <button
-                onClick={() => fetchBookings(true)}
-                disabled={loading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Refreshing...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>🔄</span>
-                    <span>Refresh</span>
-                  </>
-                )}
-              </button>
               {bookings.filter(b => b.status === 'pending').length > 0 && (
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
