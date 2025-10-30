@@ -34,14 +34,6 @@ export default function BookingCalendar({ guideName, guideId, guideRate, isOpen,
     if (isOpen && guideId) {
       fetchBookings();
       fetchAvailability();
-      
-      // Set up periodic refresh to handle booking expiry
-      const interval = setInterval(() => {
-        fetchBookings();
-        fetchAvailability();
-      }, 30000); // Refresh every 30 seconds
-
-      return () => clearInterval(interval);
     }
   }, [isOpen, guideId]);
 
@@ -67,11 +59,27 @@ export default function BookingCalendar({ guideName, guideId, guideRate, isOpen,
 
   const fetchAvailability = async () => {
     try {
-      const response = await fetch(`/api/availability?guideId=${guideId}`);
+      console.log('Fetching availability for guideId:', guideId);
+      
+      // Fetch availability for the next 6 months to cover the calendar view
+      const today = new Date();
+      const endDate = new Date();
+      endDate.setMonth(today.getMonth() + 6);
+      
+      const startDateStr = today.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      
+      const response = await fetch(`/api/availability?guideId=${guideId}&startDate=${startDateStr}&endDate=${endDateStr}`);
       const data = await response.json();
+      
+      console.log('Availability response:', { response: response.ok, data });
       
       if (response.ok) {
         setGuideAvailability(data.availability || []);
+        console.log('Set guide availability:', data.availability);
+        console.log('Total availability records:', data.availability?.length || 0);
+      } else {
+        console.error('Failed to fetch availability:', data.error);
       }
     } catch (error) {
       console.error('Error fetching availability:', error);
@@ -103,6 +111,7 @@ export default function BookingCalendar({ guideName, guideId, guideRate, isOpen,
     // Check if guide has marked this date as unavailable
     const availability = guideAvailability.find(av => av.date === dateString);
     if (availability) {
+      console.log(`Date ${dateString}: availability found`, availability);
       return availability.isAvailable ? 'available' : 'unavailable';
     }
     
@@ -112,9 +121,11 @@ export default function BookingCalendar({ guideName, guideId, guideRate, isOpen,
     );
     
     if (isBooked) {
+      console.log(`Date ${dateString}: is booked`);
       return 'booked';
     }
     
+    console.log(`Date ${dateString}: defaulting to available`);
     return 'available'; // Default to available
   };
 

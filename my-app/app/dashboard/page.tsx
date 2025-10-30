@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
   const [showAvailabilityCalendar, setShowAvailabilityCalendar] = useState(false);
+  const [cancellingBooking, setCancellingBooking] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -65,14 +66,30 @@ export default function DashboardPage() {
     }
   };
 
+  // Fetch bookings when guide profile is loaded
+  useEffect(() => {
+    if (guide?._id) {
+      console.log('Guide profile loaded, fetching bookings for guideId:', guide._id);
+      fetchBookings();
+    }
+  }, [guide]);
+
   const fetchBookings = async (showRefreshing = false) => {
     try {
       if (showRefreshing) {
         setRefreshing(true);
       }
       
-      console.log('Guide dashboard fetching bookings for guideId:', session?.user.id);
-      const response = await fetch(`/api/bookings?guideId=${session?.user.id}`);
+      console.log('Guide dashboard fetching bookings for guide profile:', guide);
+      console.log('Using guide._id as guideId:', guide?._id);
+      
+      if (!guide?._id) {
+        console.error('No guide profile found, cannot fetch bookings');
+        setBookings([]);
+        return;
+      }
+      
+      const response = await fetch(`/api/bookings?guideId=${guide._id}`);
       const data = await response.json();
       console.log('Guide dashboard received bookings:', data);
       
@@ -105,6 +122,44 @@ export default function DashboardPage() {
       }
     } catch (error) {
       setMessage('Error updating booking status');
+    }
+  };
+
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!confirm('Are you sure you want to cancel this booking?')) {
+      return;
+    }
+
+    console.log('Cancelling booking with ID:', bookingId);
+
+    setCancellingBooking(bookingId);
+    try {
+      const payload = { bookingId, status: 'cancelled' };
+      console.log('Sending payload:', payload);
+      
+      const response = await fetch('/api/bookings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log('Response status:', response.status);
+
+      if (response.ok) {
+        setMessage('Booking cancelled successfully');
+        await fetchBookings(); // Refresh bookings
+      } else {
+        const error = await response.json();
+        console.error('Error response:', error);
+        setMessage(`Error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      setMessage('Error cancelling booking');
+    } finally {
+      setCancellingBooking(null);
     }
   };
 
@@ -171,7 +226,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-100">
       <Navbar />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 w-[90%]">
         {/* Header */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
@@ -347,7 +402,7 @@ export default function DashboardPage() {
 
         {/* Guide Status & Settings */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Guide Status & Settings</h2>
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Guide Status</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
               <div>
@@ -411,51 +466,33 @@ export default function DashboardPage() {
         </div>
 
         {/* Guide Tools & Resources */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        {/* <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Guide Tools & Resources</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
-              <button
-                onClick={() => {/* TODO: Add trek route planner */}}
-                className="w-full bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700 transition font-semibold text-left">
                 🗺️ Trek Route Planner
               </button>
-              <button
-                onClick={() => {/* TODO: Add equipment checklist */}}
-                className="w-full bg-cyan-600 text-white px-4 py-3 rounded-lg hover:bg-cyan-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-cyan-600 text-white px-4 py-3 rounded-lg hover:bg-cyan-700 transition font-semibold text-left">
                 🎒 Equipment Checklist
               </button>
-              <button
-                onClick={() => {/* TODO: Add weather forecast */}}
-                className="w-full bg-sky-600 text-white px-4 py-3 rounded-lg hover:bg-sky-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-sky-600 text-white px-4 py-3 rounded-lg hover:bg-sky-700 transition font-semibold text-left">
                 🌤️ Weather Forecast
               </button>
             </div>
             <div className="space-y-3">
-              <button
-                onClick={() => {/* TODO: Add emergency contacts */}}
-                className="w-full bg-red-600 text-white px-4 py-3 rounded-lg hover:bg-red-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-red-600 text-white px-4 py-3 rounded-lg hover:bg-red-700 transition font-semibold text-left">
                 🚨 Emergency Contacts
               </button>
-              <button
-                onClick={() => {/* TODO: Add first aid guide */}}
-                className="w-full bg-pink-600 text-white px-4 py-3 rounded-lg hover:bg-pink-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-pink-600 text-white px-4 py-3 rounded-lg hover:bg-pink-700 transition font-semibold text-left">
                 🩹 First Aid Guide
               </button>
-              <button
-                onClick={() => {/* TODO: Add guide community */}}
-                className="w-full bg-violet-600 text-white px-4 py-3 rounded-lg hover:bg-violet-700 transition font-semibold text-left"
-              >
+              <button className="w-full bg-violet-600 text-white px-4 py-3 rounded-lg hover:bg-violet-700 transition font-semibold text-left">
                 👥 Guide Community
               </button>
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Bookings Section */}
         <div className="bg-white rounded-lg shadow-md p-6">
@@ -547,6 +584,19 @@ export default function DashboardPage() {
                             className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition"
                           >
                             Reject
+                          </button>
+                        </div>
+                      )}
+                      
+                      {/* Cancel button for confirmed bookings */}
+                      {booking.status === 'confirmed' && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleCancelBooking(booking.id)}
+                            disabled={cancellingBooking === booking.id}
+                            className="bg-orange-600 text-white px-4 py-2 rounded text-sm hover:bg-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {cancellingBooking === booking.id ? 'Cancelling...' : 'Cancel Booking'}
                           </button>
                         </div>
                       )}
