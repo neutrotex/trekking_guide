@@ -27,6 +27,7 @@ export default function UserDashboardPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [cancellingBooking, setCancellingBooking] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -75,6 +76,44 @@ export default function UserDashboardPage() {
     });
   };
 
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!confirm('Are you sure you want to cancel this booking?')) {
+      return;
+    }
+
+    console.log('Cancelling booking with ID:', bookingId);
+
+    setCancellingBooking(bookingId);
+    try {
+      const payload = { bookingId, status: 'cancelled' };
+      console.log('Sending payload:', payload);
+      
+      const response = await fetch('/api/bookings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log('Response status:', response.status);
+
+      if (response.ok) {
+        // Refresh bookings to show updated status
+        await fetchBookings();
+      } else {
+        const error = await response.json();
+        console.error('Error response:', error);
+        alert(`Error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      alert('Error cancelling booking');
+    } finally {
+      setCancellingBooking(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100">
@@ -93,7 +132,7 @@ export default function UserDashboardPage() {
     <div className="min-h-screen bg-gray-100">
       <Navbar />
       
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 w-[95%]">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -169,9 +208,9 @@ export default function UserDashboardPage() {
 
           {bookings.length > 0 ? (
             <div className="space-y-4">
-              {bookings.map((booking) => (
+              {bookings.map((booking, index) => (
                 <div
-                  key={booking.id}
+                  key={booking.id || `booking-${index}`}
                   className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition"
                 >
                   <div className="flex items-center justify-between">
@@ -200,6 +239,19 @@ export default function UserDashboardPage() {
                       <div className="mt-2 text-xs text-gray-500">
                         Booked on {formatDate(booking.createdAt)}
                       </div>
+                      
+                      {/* Cancel button for non-cancelled bookings */}
+                      {booking.status !== 'cancelled' && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleCancelBooking(booking.id)}
+                            disabled={cancellingBooking === booking.id}
+                            className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {cancellingBooking === booking.id ? 'Cancelling...' : 'Cancel Booking'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
