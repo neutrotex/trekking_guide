@@ -217,15 +217,15 @@ export default function UserDashboardPage() {
                         Booked on {formatDate(booking.createdAt)}
                       </div>
                       
-                      {/* Cancel button for non-cancelled bookings */}
-                      {booking.status !== 'cancelled' && (
+                      {/* Allow user cancellation only while pending */}
+                      {booking.status === 'pending' && (
                         <div className="mt-3">
                           <button
                             onClick={() => handleCancelBooking(booking.id)}
                             disabled={cancellingBooking === booking.id}
                             className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {cancellingBooking === booking.id ? 'Cancelling...' : 'Cancel Booking'}
+                            {cancellingBooking === booking.id ? 'Cancelling...' : 'Cancel Request'}
                           </button>
                         </div>
                       )}

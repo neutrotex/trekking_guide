@@ -38,7 +38,6 @@ export default function DashboardPage() {
       router.push('/login');
     } else if (status === 'authenticated' && session?.user.role === 'guide') {
       fetchProfile();
-      fetchBookings();
     } else if (status === 'authenticated' && session?.user.role === 'user') {
       router.push('/user-dashboard');
     }
@@ -81,7 +80,7 @@ export default function DashboardPage() {
       console.log('Using guide._id as guideId:', guide?._id);
       
       if (!guide?._id) {
-        console.error('No guide profile found, cannot fetch bookings');
+        // Guide profile not yet loaded; skip fetch silently
         setBookings([]);
         return;
       }
@@ -532,18 +531,7 @@ export default function DashboardPage() {
                         </div>
                       )}
                       
-                      {/* Cancel button for confirmed bookings */}
-                      {booking.status === 'confirmed' && (
-                        <div className="mt-3">
-                          <button
-                            onClick={() => handleCancelBooking(booking.id)}
-                            disabled={cancellingBooking === booking.id}
-                            className="bg-orange-600 text-white px-4 py-2 rounded text-sm hover:bg-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {cancellingBooking === booking.id ? 'Cancelling...' : 'Cancel Booking'}
-                          </button>
-                        </div>
-                      )}
+                      {/* Guides cannot cancel bookings; only accept/reject when pending */}
                     </div>
                   </div>
                 </div>
