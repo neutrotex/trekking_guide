@@ -26,7 +26,7 @@ export default function UserDashboardPage() {
   const router = useRouter();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  
   const [cancellingBooking, setCancellingBooking] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,7 +45,6 @@ export default function UserDashboardPage() {
       const response = await fetch(`/api/bookings?userId=${session?.user.id}`);
       const data = await response.json();
       setBookings(data.bookings || []);
-      setLastRefresh(new Date());
     } catch (error) {
       console.error('Error fetching bookings:', error);
     } finally {
@@ -177,32 +176,10 @@ export default function UserDashboardPage() {
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-800">Your Bookings</h2>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={fetchBookings}
-                disabled={loading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Refreshing...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>🔄</span>
-                    <span>Refresh</span>
-                  </>
-                )}
-              </button>
-              <div className="text-right">
-                <span className="text-sm text-gray-500">
-                  {bookings.length} booking{bookings.length !== 1 ? 's' : ''}
-                </span>
-                <div className="text-xs text-gray-400">
-                  Last updated: {lastRefresh.toLocaleTimeString()}
-                </div>
-              </div>
+            <div className="text-right">
+              <span className="text-sm text-gray-500">
+                {bookings.length} booking{bookings.length !== 1 ? 's' : ''}
+              </span>
             </div>
           </div>
 

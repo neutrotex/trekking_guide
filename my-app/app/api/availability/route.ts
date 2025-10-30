@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
 import AvailabilityModel from '@/models/Availability';
+import GuideModel from '@/models/Guide';
 import mongoose from 'mongoose';
 
 export async function GET(request: NextRequest) {
@@ -18,11 +19,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Guide ID is required' }, { status: 400 });
     }
 
-    // Convert guideId string to ObjectId
-    const guideIdObjectId = new mongoose.Types.ObjectId(guideId);
+    // Convert incoming guideId to ObjectId
+    const incomingObjectId = new mongoose.Types.ObjectId(guideId);
 
-    // Build query for MongoDB
-    const query: any = { guideId: guideIdObjectId };
+    // First, attempt to use the incoming ID directly (this matches how we store guideId from session.user.id)
+    let effectiveGuideObjectId: mongoose.Types.ObjectId = incomingObjectId;
+
+    // If no availability is found with the direct ID, we will try resolving the guide profile (_id) to the owning userId
+    let query: any = { guideId: effectiveGuideObjectId };
     
     if (startDate && endDate) {
       query.date = {
@@ -31,8 +35,20 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    // Fetch availability from MongoDB
-    const availability = await AvailabilityModel.find(query).lean();
+    // Fetch availability; if none found, try resolving via Guide profile -> userId
+    let availability = await AvailabilityModel.find(query).lean();
+    if (availability.length === 0) {
+      try {
+        const guideProfile = await GuideModel.findById(incomingObjectId).lean();
+        if (guideProfile && guideProfile.userId) {
+          effectiveGuideObjectId = new mongoose.Types.ObjectId(guideProfile.userId as any);
+          query = { ...query, guideId: effectiveGuideObjectId };
+          availability = await AvailabilityModel.find(query).lean();
+        }
+      } catch (e) {
+        // ignore resolution errors; we'll return whatever we have
+      }
+    }
 
     // Format the response to match client expectations
     const formattedAvailability = availability.map(av => ({
