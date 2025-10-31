@@ -2,14 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
-
-// Mock availability data - in production, this would be stored in MongoDB
-let availabilityData: Array<{
-  guideId: string;
-  date: string;
-  isAvailable: boolean;
-  updatedAt: string;
-}> = [];
+import AvailabilityModel from '@/models/Availability';
+import GuideModel from '@/models/Guide';
+import mongoose from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,17 +19,55 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Guide ID is required' }, { status: 400 });
     }
 
-    // Filter availability for the specific guide and date range
-    let filteredAvailability = availabilityData.filter(av => av.guideId === guideId);
+    // Convert incoming guideId to ObjectId
+    const incomingObjectId = new mongoose.Types.ObjectId(guideId);
+
+    // First, attempt to use the incoming ID directly (this matches how we store guideId from session.user.id)
+    let effectiveGuideObjectId: mongoose.Types.ObjectId = incomingObjectId;
+
+    // If no availability is found with the direct ID, we will try resolving the guide profile (_id) to the owning userId
+    let query: any = { guideId: effectiveGuideObjectId };
     
     if (startDate && endDate) {
-      filteredAvailability = filteredAvailability.filter(av => 
-        av.date >= startDate && av.date <= endDate
-      );
+      query.date = {
+        $gte: startDate,
+        $lte: endDate
+      };
     }
 
+    // Fetch availability; if none found, try resolving via Guide profile -> userId
+    let availability = await AvailabilityModel.find(query).lean();
+    if (availability.length === 0) {
+      try {
+        const guideProfile = await GuideModel.findById(incomingObjectId).lean();
+        if (guideProfile && guideProfile.userId) {
+          effectiveGuideObjectId = new mongoose.Types.ObjectId(guideProfile.userId as any);
+          query = { ...query, guideId: effectiveGuideObjectId };
+          availability = await AvailabilityModel.find(query).lean();
+        }
+      } catch (e) {
+        // ignore resolution errors; we'll return whatever we have
+      }
+    }
+
+    // Format the response to match client expectations
+    const formattedAvailability = availability.map(av => ({
+      guideId: av.guideId.toString(),
+      date: av.date,
+      isAvailable: av.isAvailable,
+      updatedAt: av.updatedAt
+    }));
+
+    console.log('Fetched availability:', {
+      guideId,
+      startDate,
+      endDate,
+      foundRecords: availability.length,
+      records: formattedAvailability.map(av => ({ date: av.date, isAvailable: av.isAvailable }))
+    });
+
     return NextResponse.json({ 
-      availability: filteredAvailability,
+      availability: formattedAvailability,
       guideId,
       dateRange: { startDate, endDate }
     }, { status: 200 });
@@ -61,38 +94,45 @@ export async function POST(request: NextRequest) {
     }
 
     const guideId = session.user.id;
-    const now = new Date().toISOString();
 
-    // Update or create availability records
-    dates.forEach((date: string) => {
-      const existingIndex = availabilityData.findIndex(
-        av => av.guideId === guideId && av.date === date
-      );
+    // Convert guideId string to ObjectId
+    const guideIdObjectId = new mongoose.Types.ObjectId(guideId);
 
-      if (existingIndex >= 0) {
-        // Update existing record
-        availabilityData[existingIndex] = {
-          ...availabilityData[existingIndex],
-          isAvailable,
-          updatedAt: now
-        };
-      } else {
-        // Create new record
-        availabilityData.push({
-          guideId,
-          date,
-          isAvailable,
-          updatedAt: now
-        });
+    // Use MongoDB bulk operations for efficiency
+    const operations = dates.map((date: string) => ({
+      updateOne: {
+        filter: { guideId: guideIdObjectId, date },
+        update: { 
+          $set: { 
+            guideId: guideIdObjectId,
+            isAvailable, 
+            updatedAt: new Date() 
+          } 
+        },
+        upsert: true // Create if doesn't exist
       }
-    });
+    }));
 
-    console.log(`Updated availability for guide ${guideId}:`, dates, isAvailable);
+    await AvailabilityModel.bulkWrite(operations);
+
+    // Verify the save by fetching back the records
+    const savedRecords = await AvailabilityModel.find({
+      guideId: guideIdObjectId,
+      date: { $in: dates }
+    }).lean();
+
+    console.log(`Updated availability for guide ${guideId}:`, {
+      dates,
+      isAvailable,
+      savedCount: savedRecords.length,
+      savedRecords: savedRecords.map(r => ({ date: r.date, isAvailable: r.isAvailable }))
+    });
 
     return NextResponse.json({ 
       message: 'Availability updated successfully',
       updatedDates: dates,
-      isAvailable
+      isAvailable,
+      savedCount: savedRecords.length
     }, { status: 200 });
 
   } catch (error: any) {

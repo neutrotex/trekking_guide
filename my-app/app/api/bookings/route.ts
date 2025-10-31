@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import BookingModel from '@/models/Booking';
+import mongoose from 'mongoose';
 
 // Function to check guide availability
 async function checkGuideAvailability(guideId: string, startDate: string, endDate: string): Promise<boolean> {
@@ -27,13 +28,29 @@ export async function POST(req: NextRequest) {
     
     const { guideId, guideName, userId, userName, from, to, duration, totalCost } = await req.json();
 
+    console.log('Creating booking with data:', {
+      guideId, guideName, userId, userName, from, to, duration, totalCost
+    });
+
     // Validate required fields
     if (!guideId || !guideName || !userId || !userName || !from || !to || !duration || !totalCost) {
+      console.error('Missing required fields:', {
+        guideId: !!guideId,
+        guideName: !!guideName,
+        userId: !!userId,
+        userName: !!userName,
+        from: !!from,
+        to: !!to,
+        duration: !!duration,
+        totalCost: !!totalCost
+      });
       return NextResponse.json(
         { error: 'Missing required booking information' },
         { status: 400 }
       );
     }
+
+    // IDs are stored as strings in Booking schema; keep them as strings
 
     // Check guide availability
     const startDate = new Date(from).toISOString().split('T')[0];
@@ -49,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     // Check for conflicting bookings (confirmed or pending)
     const conflictingBooking = await BookingModel.findOne({
-      guideId,
+      guideId: guideId,
       status: { $in: ['confirmed', 'pending'] },
       $or: [
         {
@@ -68,9 +85,9 @@ export async function POST(req: NextRequest) {
 
     // Create new booking with pending status and 30-minute expiry
     const newBooking = new BookingModel({
-      guideId,
+      guideId: guideId,
       guideName,
-      userId,
+      userId: userId,
       userName,
       from: new Date(from),
       to: new Date(to),
@@ -114,6 +131,8 @@ export async function GET(req: NextRequest) {
     const guideId = searchParams.get('guideId');
     const userId = searchParams.get('userId');
 
+    console.log('Fetching bookings with params:', { guideId, userId });
+
     // Auto-expire pending bookings that have passed their expiry time
     await BookingModel.updateMany(
       {
@@ -125,7 +144,7 @@ export async function GET(req: NextRequest) {
       }
     );
 
-    // Build query
+    // Build query (IDs are stored as strings in Booking schema)
     const query: any = {};
     if (guideId) {
       query.guideId = guideId;
@@ -134,20 +153,35 @@ export async function GET(req: NextRequest) {
       query.userId = userId;
     }
 
-    // Fetch bookings from database
+    // Fetch bookings from database (avoid lean() to keep typings simple)
     const bookings = await BookingModel.find(query)
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
+
+    // Format the bookings to include id field
+    const formattedBookings = bookings.map(booking => ({
+      id: booking._id.toString(),
+      guideId: booking.guideId,
+      userId: booking.userId,
+      guideName: booking.guideName,
+      userName: booking.userName,
+      from: booking.from,
+      to: booking.to,
+      duration: booking.duration,
+      totalCost: booking.totalCost,
+      status: booking.status,
+      createdAt: booking.createdAt,
+      expiresAt: booking.expiresAt
+    }));
 
     console.log('Fetching bookings:', {
       query,
       guideId,
       userId,
-      foundBookings: bookings.length,
-      bookings: bookings.map(b => ({ id: b._id, guideId: b.guideId, userId: b.userId, status: b.status }))
+      foundBookings: formattedBookings.length,
+      bookings: formattedBookings.map(b => ({ id: b.id, guideId: b.guideId, userId: b.userId, status: b.status }))
     });
 
-    return NextResponse.json({ bookings }, { status: 200 });
+    return NextResponse.json({ bookings: formattedBookings }, { status: 200 });
   } catch (error: any) {
     console.error('Error fetching bookings:', error);
     return NextResponse.json(
@@ -161,34 +195,60 @@ export async function PUT(req: NextRequest) {
   try {
     await connectDB();
     
-    const { bookingId, status } = await req.json();
+    // Parse the request body
+    const body = await req.json();
+    const { bookingId, status } = body;
+
+    console.log('PUT Request received:', {
+      body,
+      bookingId,
+      status,
+      hasBookingId: !!bookingId,
+      hasStatus: !!status
+    });
 
     if (!bookingId || !status) {
+      console.error('Missing booking ID or status:', { bookingId: !!bookingId, status: !!status, body });
       return NextResponse.json(
-        { error: 'Missing booking ID or status' },
+        { error: 'Missing booking ID or status', received: { bookingId: !!bookingId, status: !!status } },
         { status: 400 }
       );
     }
 
-    if (!['confirmed', 'rejected'].includes(status)) {
+    if (!['confirmed', 'rejected', 'cancelled'].includes(status)) {
+      console.error('Invalid status:', status);
       return NextResponse.json(
-        { error: 'Invalid status. Must be "confirmed" or "rejected"' },
+        { error: 'Invalid status. Must be "confirmed", "rejected", or "cancelled"' },
         { status: 400 }
       );
     }
 
-    const booking = await BookingModel.findById(bookingId);
+    // Convert bookingId to ObjectId
+    let bookingIdObjectId;
+    try {
+      bookingIdObjectId = new mongoose.Types.ObjectId(bookingId);
+    } catch (error) {
+      console.error('Invalid bookingId format:', bookingId);
+      return NextResponse.json(
+        { error: 'Invalid booking ID format' },
+        { status: 400 }
+      );
+    }
+
+    const booking = await BookingModel.findById(bookingIdObjectId);
 
     if (!booking) {
+      console.error('Booking not found:', bookingId);
       return NextResponse.json(
         { error: 'Booking not found' },
         { status: 404 }
       );
     }
 
-    if (booking.status !== 'pending') {
+    if (booking.status !== 'pending' && status !== 'cancelled') {
+      console.error('Invalid status change:', { currentStatus: booking.status, newStatus: status });
       return NextResponse.json(
-        { error: 'Booking is not pending' },
+        { error: 'Only pending bookings can be confirmed or rejected' },
         { status: 400 }
       );
     }
@@ -204,8 +264,13 @@ export async function PUT(req: NextRequest) {
     }
 
     // Update booking status
-    booking.status = status as 'confirmed' | 'rejected';
+    booking.status = status as 'confirmed' | 'rejected' | 'cancelled';
     await booking.save();
+
+    console.log('Booking updated successfully:', {
+      id: booking._id,
+      status: booking.status
+    });
 
     return NextResponse.json(
       { 
