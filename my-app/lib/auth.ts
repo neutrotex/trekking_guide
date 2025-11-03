@@ -15,20 +15,37 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         try {
           if (!credentials?.email || !credentials?.password) {
-            throw new Error('Please enter your email and password');
+            console.error('Missing credentials: email or password not provided');
+            return null;
           }
 
           // Check if environment variables are loaded
           if (!process.env.MONGODB_URI) {
             console.error('MONGODB_URI not found in environment variables');
-            throw new Error('Database configuration not found');
+            return null;
           }
 
           await connectDB();
-          const user = await UserModel.findOne({ email: credentials.email });
+          
+          // Normalize email to lowercase for case-insensitive comparison
+          const normalizedEmail = credentials.email.toLowerCase().trim();
+          const user = await UserModel.findOne({ email: normalizedEmail });
 
-          if (!user || !(await bcrypt.compare(credentials.password, user.password))) {
-            throw new Error('Invalid credentials');
+          if (!user) {
+            console.error(`User not found: ${normalizedEmail}`);
+            return null;
+          }
+
+          if (!user.password) {
+            console.error(`User password not set for: ${normalizedEmail}`);
+            return null;
+          }
+
+          const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
+          
+          if (!isPasswordValid) {
+            console.error(`Invalid password for user: ${normalizedEmail}`);
+            return null;
           }
 
           return {
@@ -39,7 +56,7 @@ export const authOptions: NextAuthOptions = {
           };
         } catch (error: any) {
           console.error('Error in NextAuth authorize:', error);
-          throw new Error(error.message || 'Authentication failed');
+          return null;
         }
       },
     }),
