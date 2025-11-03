@@ -28,9 +28,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Normalize email to lowercase for consistency
+    const normalizedEmail = email.toLowerCase().trim();
+
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       return NextResponse.json(
         { error: 'Please provide a valid email address' },
         { status: 400 }
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existingUser = await UserModel.findOne({ email });
+    const existingUser = await UserModel.findOne({ email: normalizedEmail });
 
     if (existingUser) {
       return NextResponse.json(
@@ -58,13 +61,13 @@ export async function POST(req: NextRequest) {
 
     const user = new UserModel({
       name,
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
       role: role || 'user',
     });
 
     await user.save();
-    console.log(`User registered successfully: ${email}`);
+    console.log(`User registered successfully: ${normalizedEmail}`);
 
     return NextResponse.json(
       { 
