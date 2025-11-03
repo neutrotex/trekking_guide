@@ -12,10 +12,32 @@ const difficultyColors = {
 };
 
 export default function TrekCard({ trek }: TrekCardProps) {
+  // Get the first photo if available, otherwise use placeholder
+  const displayPhoto = trek.photos && trek.photos.length > 0 
+    ? trek.photos[0].url 
+    : null;
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition">
-      <div className="h-48 bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 flex items-center justify-center overflow-hidden">
-        <span className="text-6xl filter drop-shadow-lg">🏔️</span>
+      <div className="h-48 relative overflow-hidden">
+        {displayPhoto ? (
+          <img 
+            src={displayPhoto} 
+            alt={trek.name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="h-full bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 flex items-center justify-center">
+            <span className="text-6xl filter drop-shadow-lg">🏔️</span>
+          </div>
+        )}
+        {/* Photo count badge */}
+        {trek.photos && trek.photos.length > 0 && (
+          <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
+            <span>📷</span>
+            <span>{trek.photos.length}</span>
+          </div>
+        )}
       </div>
       <div className="p-4">
         <div className="flex items-center justify-between mb-2">

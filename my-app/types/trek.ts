@@ -18,6 +18,13 @@ export interface RoutePoint {
   altitude: string;
 }
 
+export interface TrekPhoto {
+  url: string;
+  caption?: string;
+  routePointIndex?: number; // Index of the route point this photo belongs to
+  routePointName?: string; // Name of the route point
+}
+
 export type Difficulty = 'easy' | 'moderate' | 'hard';
 
 export interface Trek {
@@ -32,6 +39,7 @@ export interface Trek {
   shops: Shop[];
   wastePoints: WastePoint[];
   route?: RoutePoint[];
+  photos?: TrekPhoto[]; // Photos ordered from start to finish
   createdAt?: Date;
   updatedAt?: Date;
 }

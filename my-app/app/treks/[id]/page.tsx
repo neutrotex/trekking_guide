@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import Navbar from '@/components/Navbar';
 import { Trek } from '@/types/trek';
@@ -166,6 +167,74 @@ export default function TrekDetailsPage() {
               </div>
             </div>
           </div>
+
+          {/* Photo Gallery Preview - Show first 3 photos */}
+          {trek.photos && trek.photos.length > 0 && (
+            <div className="mb-8">
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-gray-800">
+                    📸 Photos from Start to Finish
+                  </h2>
+                  <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                    {trek.photos.length} {trek.photos.length === 1 ? 'photo' : 'photos'}
+                  </span>
+                </div>
+                
+                {/* Show first 3 photos in grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  {trek.photos.slice(0, 3).map((photo, index) => (
+                    <Link
+                      key={index}
+                      href={`/treks/${trek._id}/photos?photo=${index}`}
+                      className="group relative overflow-hidden rounded-lg shadow-md hover:shadow-xl transition-all duration-300 cursor-pointer block"
+                    >
+                      <div className="relative aspect-square">
+                        <img
+                          src={photo.url}
+                          alt={photo.caption || `Photo ${index + 1} of ${trek.name}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                        {/* Overlay on hover */}
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity duration-300 flex items-center justify-center">
+                          <span className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 text-lg">
+                            🔍 View
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Photo info */}
+                      {(photo.caption || photo.routePointName) && (
+                        <div className="p-3 bg-white">
+                          {photo.routePointName && (
+                            <div className="text-sm font-semibold text-blue-600 mb-1">
+                              📍 {photo.routePointName}
+                            </div>
+                          )}
+                          {photo.caption && (
+                            <p className="text-sm text-gray-600 line-clamp-2">{photo.caption}</p>
+                          )}
+                        </div>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+
+                {/* Show More button if there are more than 3 photos */}
+                {trek.photos.length > 3 && (
+                  <div className="text-center">
+                    <Link
+                      href={`/treks/${trek._id}/photos`}
+                      className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium shadow-sm hover:shadow-md"
+                    >
+                      Show More Photos ({trek.photos.length - 3} more) →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           
           <div className="bg-white rounded-lg shadow-lg overflow-hidden p-6">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">

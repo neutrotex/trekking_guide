@@ -1,19 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import dynamic from 'next/dynamic';
 import Navbar from '@/components/Navbar';
 import TrekCard from '@/components/TrekCard';
 import { Trek } from '@/types/trek';
-
-const TreksOverviewMap = dynamic(() => import('@/components/TreksOverviewMap'), {
-  ssr: false,
-  loading: () => (
-    <div className="h-96 bg-gray-200 rounded-lg flex items-center justify-center">
-      <span>Loading map...</span>
-    </div>
-  ),
-});
 
 export default function TreksPage() {
   const [treks, setTreks] = useState<Trek[]>([]);
@@ -77,42 +67,13 @@ export default function TreksPage() {
         ) : treks.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-600">No treks found yet.</p>
-            
-            {/* Show empty map */}
-            <div className="mt-8">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                🗺️ Trek Routes Map
-              </h2>
-              <div className="bg-white rounded-lg shadow-lg overflow-hidden p-6">
-                <div className="h-96 bg-gray-100 rounded-lg flex items-center justify-center">
-                  <div className="text-center">
-                    <span className="text-gray-500 text-lg">No trek data available</span>
-                    <br />
-                    <span className="text-gray-400 text-sm">Connect to database to see trek routes</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         ) : (
-          <>
-            {/* Map Overview */}
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                🗺️ All Trek Routes Overview
-              </h2>
-              <div className="bg-white rounded-lg shadow-lg overflow-hidden p-6">
-                <TreksOverviewMap treks={treks} />
-              </div>
-            </div>
-            
-            {/* Trek Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {treks.map((trek) => (
-                <TrekCard key={trek._id} trek={trek} />
-              ))}
-            </div>
-          </>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {treks.map((trek) => (
+              <TrekCard key={trek._id} trek={trek} />
+            ))}
+          </div>
         )}
       </div>
     </div>

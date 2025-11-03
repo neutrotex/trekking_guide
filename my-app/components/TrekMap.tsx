@@ -51,7 +51,7 @@ export default function TrekMap({ trek }: TrekMapProps) {
 
   if (!isMounted) {
     return (
-      <div className="h-96 bg-gray-200 rounded-lg flex items-center justify-center">
+      <div className="h-[600px] bg-gray-200 rounded-lg flex items-center justify-center">
         <span>Loading map...</span>
       </div>
     );
@@ -74,12 +74,12 @@ export default function TrekMap({ trek }: TrekMapProps) {
   const routeCoordinates = routePoints.map(point => [point.lat, point.lng] as [number, number]);
 
   return (
-    <div style={{ height: '384px', width: '100%', position: 'relative' }}>
+    <div style={{ height: '600px', width: '100%', position: 'relative' }}>
       <MapContainer
         center={center}
         zoom={11}
         scrollWheelZoom={false}
-        className="h-96 w-full rounded-lg"
+        className="h-[600px] w-full rounded-lg"
         style={{ height: '100%', width: '100%', zIndex: 0 }}
       >
         <TileLayer

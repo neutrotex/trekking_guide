@@ -21,6 +21,13 @@ const routePointSchema = new Schema({
   altitude: { type: String, required: true },
 }, { _id: false });
 
+const trekPhotoSchema = new Schema({
+  url: { type: String, required: true },
+  caption: { type: String },
+  routePointIndex: { type: Number },
+  routePointName: { type: String },
+}, { _id: false });
+
 const trekSchema = new Schema<Trek>(
   {
     name: {
@@ -51,6 +58,7 @@ const trekSchema = new Schema<Trek>(
     shops: [shopSchema],
     wastePoints: [wastePointSchema],
     route: [routePointSchema],
+    photos: [trekPhotoSchema],
   },
   {
     timestamps: true,
